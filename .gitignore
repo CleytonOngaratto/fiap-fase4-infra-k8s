@@ -1,45 +1,74 @@
-# Estado do Terraform — NUNCA versionar (contém tudo em texto plano).
+# ============================================================================
+# .gitignore — plataforma da Fase 4 (Terraform)
+# Regra: comentário sempre em linha própria — no .gitignore, texto depois de um
+# padrão faz parte do padrão.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Terraform — state e artefatos (NUNCA versionar: contêm tudo em texto plano)
+# ---------------------------------------------------------------------------
 *.tfstate
 *.tfstate.*
-
-# Diretório de trabalho / providers baixados.
+.terraform.tfstate.lock.info
 .terraform/
-
-# Config do backend: depende da conta do Learner Lab (gerada por scripts/bootstrap-backend.ps1).
-backend.hcl
-
-# Valores locais. O terraform.tfvars.example É versionado (não casa este padrão) e serve de molde.
-# No CI os mesmos valores chegam por TF_VAR_* a partir das repository variables — ver README.
-terraform.tfvars
-*.auto.tfvars
-
-# Planos salvos e crash logs.
+# Planos salvos carregam um retrato do state (IDs de conta, endpoints, certificado do cluster).
+# "tfplan*" cobre também nomes como tfplan.repo2 — na Fase 3 dois desses chegaram a ser
+# versionados por engano.
 *.tfplan
-tfplan
+tfplan*
 crash.log
 crash.*.log
+# Config do backend: depende da conta do Learner Lab (gerada por scripts/bootstrap-backend.ps1).
+backend.hcl
+# Valores locais. O terraform.tfvars.example É versionado (não casa estes padrões) e serve de molde;
+# no CI os mesmos valores chegam por TF_VAR_* a partir das repository variables.
+terraform.tfvars
+*.auto.tfvars
+*.tfvars.json
+# Overrides locais e config da CLI (pode conter token).
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# O .terraform.lock.hcl é versionado de propósito: o CI resolve os mesmos providers da máquina.
 
+# ---------------------------------------------------------------------------
+# Kubernetes
+# ---------------------------------------------------------------------------
 # Kubeconfig gerado por `aws eks update-kubeconfig --kubeconfig ./...`
 kubeconfig
 kubeconfig.*
 
-# O .terraform.lock.hcl NÃO entra aqui de propósito: ele é versionado para o CI resolver
-# exatamente os mesmos providers que a máquina local.
-
-# IDE — configuração de máquina, não de projeto.
-.idea
-*.iml
-.vscode
-
-# Credenciais locais — nunca versionar.
+# ---------------------------------------------------------------------------
+# Segredos e credenciais — NUNCA versionar
+# ---------------------------------------------------------------------------
 .secrets/
 .aws/
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 
-# ==========================================
+# ---------------------------------------------------------------------------
+# IDEs, sistema operacional e logs
+# ---------------------------------------------------------------------------
+.idea
+*.iml
+.vscode
+.DS_Store
+Thumbs.db
+desktop.ini
+*.bak
+*.log
+
+# ---------------------------------------------------------------------------
 # IA / cockpit (moram na pasta-mãe, não neste repo)
-# ==========================================
+# ---------------------------------------------------------------------------
 CLAUDE.md
 .claude/
+.handoff/
 PLAN-FASE4.md
 PROGRESS-FASE4.md
