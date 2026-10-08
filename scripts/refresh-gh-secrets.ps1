@@ -1,19 +1,4 @@
-﻿<#
-.SYNOPSIS
-    Propaga as credenciais temporárias do Learner Lab para os GitHub Secrets dos 5 repositórios.
-
-.DESCRIPTION
-    A sessão do lab dura ~4h e as credenciais mudam a cada início; sem isto toda pipeline falha em
-    `configure-aws-credentials`. Requer `gh auth login` e o bloco "AWS Details" já em ~/.aws/credentials.
-
-    Na PRIMEIRA execução passe também -ClusterRoleName, -NodeRoleName e -StateBucket: as variables
-    não mudam entre sessões, mas sem elas o workflow de Terraform falha de propósito.
-
-.EXAMPLE
-    .\scripts\refresh-gh-secrets.ps1 -Org meu-usuario-github
-#>
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Org,
     [string]$Profile = "default",
@@ -42,7 +27,6 @@ if (-not $keyId -or -not $secret -or -not $token) {
     throw "Credenciais incompletas no perfil '$Profile'. O Learner Lab exige os TRES valores (a sessao e temporaria, precisa do session token)."
 }
 
-# Confirma que a credencial esta viva ANTES de espalhar por 5 repos.
 $identity = aws sts get-caller-identity --profile $Profile --output json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw "As credenciais do perfil '$Profile' nao sao validas (sessao expirada?)." }
 Write-Host "Credencial valida — conta $($identity.Account)" -ForegroundColor Green

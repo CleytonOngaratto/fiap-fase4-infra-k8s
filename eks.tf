@@ -1,5 +1,4 @@
-# O AWS Academy bloqueia iam:CreateRole: nenhum role é criado neste repo, todos vêm por data source.
-# O EKS não usa a LabRole — usa roles próprios, cujos nomes o lab gera com sufixo (ver variables.tf).
+# O AWS Academy nega iam:CreateRole: todo role vem por data source.
 data "aws_iam_role" "eks_cluster" {
   name = var.cluster_role_name
 }
@@ -21,14 +20,11 @@ resource "aws_eks_cluster" "main" {
   }
 
   access_config {
-    # API_AND_CONFIG_MAP mantém o aws-auth como caminho de join dos nós.
     authentication_mode = "API_AND_CONFIG_MAP"
 
-    # Dá admin no cluster a quem roda o apply. É CREATE-ONLY: mudar depois recria o cluster inteiro.
+    # Create-only: mudar depois recria o cluster.
     bootstrap_cluster_creator_admin_permissions = true
   }
-
-  # Sem enabled_cluster_log_types: log de control plane vai para o CloudWatch e custa.
 
   tags = { Name = local.cluster_name }
 }
@@ -38,7 +34,6 @@ resource "aws_eks_node_group" "default" {
   node_group_name = "${var.project}-ng"
   node_role_arn   = data.aws_iam_role.eks_node.arn
 
-  # subnet_ids é force-replacement: alternar enable_nat_gateway recria o node group (~10 min).
   subnet_ids = local.node_subnet_ids
 
   ami_type       = "AL2023_x86_64_STANDARD"
@@ -59,8 +54,7 @@ resource "aws_eks_node_group" "default" {
   tags = { Name = "${var.project}-ng" }
 }
 
-# vpc-cni e kube-proxy são pré-requisito para o nó ficar Ready, então NÃO podem depender do node
-# group. coredns e metrics-server precisam de nó para agendar, e por isso dependem.
+# vpc-cni e kube-proxy não dependem do node group: sem eles o nó nunca fica Ready.
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name                = aws_eks_cluster.main.name
   addon_name                  = "vpc-cni"
@@ -84,7 +78,6 @@ resource "aws_eks_addon" "coredns" {
   depends_on = [aws_eks_node_group.default]
 }
 
-# Sem metrics-server o HPA da aplicacao fica <unknown> e nunca escala.
 resource "aws_eks_addon" "metrics_server" {
   count = var.enable_metrics_server ? 1 : 0
 

@@ -1,15 +1,4 @@
-﻿<#
-.SYNOPSIS
-    Cria o bucket S3 do state remoto e gera o backend.hcl local. Rode uma vez por conta.
-
-.DESCRIPTION
-    Os repos de infra (2, 3 e 5) compartilham o mesmo bucket, cada um com sua `key`.
-
-.EXAMPLE
-    .\scripts\bootstrap-backend.ps1
-#>
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Region = "us-east-1",
     [string]$StateKey = "infra-k8s/terraform.tfstate"
@@ -23,8 +12,6 @@ if ($LASTEXITCODE -ne 0) { throw "Sem credenciais validas. Abra a sessao do Lear
 $bucket = "fiap-fase4-tfstate-$($identity.Account)"
 Write-Host "Conta $($identity.Account) · bucket alvo: $bucket" -ForegroundColor Cyan
 
-# list-buckets e nao head-bucket: o head-bucket escreve um 404 em stderr quando o bucket ainda nao
-# existe, que aparece em vermelho e parece falha sendo o caminho normal da primeira execucao.
 $existente = aws s3api list-buckets --query "Buckets[?Name=='$bucket'].Name" --output text
 if ($existente -eq $bucket) {
     Write-Host "Bucket ja existe — nada a criar." -ForegroundColor Green
@@ -47,16 +34,12 @@ else {
     Write-Host "Bucket criado, versionado e fechado para acesso publico." -ForegroundColor Green
 }
 
-# Todo recurso AWS do projeto leva Project=fiap-fase4. Fora do if de proposito: put-bucket-tagging
-# substitui o conjunto inteiro (idempotente) e corrige tambem um bucket criado antes desta regra.
 $null = aws s3api put-bucket-tagging --bucket $bucket --tagging "TagSet=[{Key=Project,Value=fiap-fase4},{Key=ManagedBy,Value=bootstrap-backend}]"
 if ($LASTEXITCODE -ne 0) { throw "Falha ao taguear o bucket $bucket." }
 Write-Host "Tags do bucket: Project=fiap-fase4, ManagedBy=bootstrap-backend." -ForegroundColor Green
 
 $backendPath = Join-Path (Split-Path $PSScriptRoot -Parent) "backend.hcl"
 @"
-# Gerado por scripts/bootstrap-backend.ps1 — NAO versionar (depende da conta do lab).
-# Uso: terraform init "-backend-config=backend.hcl"
 bucket       = "$bucket"
 key          = "$StateKey"
 region       = "$Region"

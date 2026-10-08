@@ -5,7 +5,6 @@ data "aws_availability_zones" "available" {
 resource "aws_vpc" "main" {
   cidr_block = var.vpc_cidr
 
-  # Sem os dois, o endpoint do RDS não resolve dentro da VPC.
   enable_dns_hostnames = true
   enable_dns_support   = true
 
@@ -17,8 +16,7 @@ resource "aws_internet_gateway" "main" {
   tags   = { Name = "${var.project}-igw" }
 }
 
-# As tags kubernetes.io/* são o mecanismo de descoberta do cloud controller do EKS: é por elas que
-# um Service type=LoadBalancer acha onde criar o ELB. Sem elas, o Service fica <pending> para sempre.
+# As tags kubernetes.io/* são como o cloud controller acha as subnets do LB: sem elas o Service fica <pending>.
 resource "aws_subnet" "public" {
   count = length(var.public_subnet_cidrs)
 
@@ -48,7 +46,6 @@ resource "aws_subnet" "private" {
   }
 }
 
-# Um NAT só (e não um por AZ): ~US$1,20/dia cada. Perde HA de saída se a AZ cair.
 resource "aws_eip" "nat" {
   count = var.enable_nat_gateway ? 1 : 0
 
@@ -62,7 +59,6 @@ resource "aws_nat_gateway" "main" {
   allocation_id = aws_eip.nat[0].id
   subnet_id     = aws_subnet.public[0].id
 
-  # Sem isto o NAT pode nascer antes do IGW estar anexado, e fica sem rota.
   depends_on = [aws_internet_gateway.main]
 
   tags = { Name = "${var.project}-nat" }
@@ -108,8 +104,6 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private[count.index].id
 }
 
-# Gratuito, e tira o `docker pull` do caminho pago do NAT (as camadas do ECR ficam no S3).
-# Também na route table pública para cobrir o modo enable_nat_gateway = false.
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.main.id
   service_name      = "com.amazonaws.${var.region}.s3"

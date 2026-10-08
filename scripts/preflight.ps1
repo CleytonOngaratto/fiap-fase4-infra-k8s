@@ -1,16 +1,4 @@
-﻿<#
-.SYNOPSIS
-    GATE — roda ANTES de `terraform apply`. Custa segundos e evita um apply de 15 minutos.
-
-.DESCRIPTION
-    Descobre e reporta o ambiente do Learner Lab: sessão, roles do EKS, policies, SSM e limites.
-    O `node_role_name` e o `cluster_role_name` que ele imprimir vão para o terraform.tfvars.
-
-.EXAMPLE
-    .\scripts\preflight.ps1
-#>
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Region = "us-east-1",
     [string[]]$CandidateRoles = @("LabEksClusterRole", "LabEksNodeRole", "LabRole")
@@ -34,19 +22,14 @@ Write-Ok "Conta $($identity.Account) · $($identity.Arn)"
 
 Write-Head "2. Roles de EKS (descoberta)"
 
-# A doc do lab fala em "Roles ... created for Cluster and Node" (plural): o normal e existirem DOIS
-# roles, com trust policies diferentes. Nunca assuma que o mesmo serve para os dois papeis.
 $roleNames = @()
-# Path=='/' exclui os service-linked roles (AWSServiceRoleForAmazonEKS*, path /aws-service-role/).
-# A AWS os cria sozinha no primeiro apply e eles SOBREVIVEM ao destroy: como confiam em
-# eks.amazonaws.com, seriam escolhidos por engano — e nao servem como role de cluster.
+# Path=='/' exclui os service-linked roles do EKS, que sobrevivem ao destroy e seriam escolhidos por engano.
 $listed = aws iam list-roles --query "Roles[?Path=='/'].RoleName" --output json | ConvertFrom-Json
 if ($LASTEXITCODE -eq 0 -and $listed) {
     $roleNames = @($listed | Where-Object { $_ -match "Eks" -or $_ -eq "LabRole" })
     Write-Ok "list-roles permitido — $($roleNames.Count) role(s) candidato(s)"
 }
 else {
-    # IAM e "extremely limited access" no lab: se ListRoles for negado, sonda nome a nome.
     Write-Warn2 "iam:ListRoles negado — caindo para sondagem nome a nome"
     foreach ($candidate in $CandidateRoles) {
         $null = aws iam get-role --role-name $candidate --output json
@@ -62,8 +45,7 @@ if ($roleNames.Count -eq 0) {
 $clusterRole = $null
 $nodeRole = $null
 
-# Prioriza os roles dedicados ao EKS: a LabRole tambem confia nos dois principals e seria escolhida
-# se viesse antes na lista — funcionaria, mas nao e o role que a doc do lab indica para o EKS.
+# LabEks primeiro: a LabRole tambem confia nos dois principals e seria escolhida antes.
 $roleNames = @($roleNames | Sort-Object { $_ -notmatch "LabEks" })
 
 foreach ($name in $roleNames) {
@@ -84,7 +66,6 @@ foreach ($name in $roleNames) {
     Write-Host "  - $name -> $label"
     Write-Host "      policies: $($policies -join ', ')" -ForegroundColor DarkGray
 
-    # Um role que confie nos dois principals vale para os dois papeis.
     if ($trustsEks -and $null -eq $clusterRole) { $clusterRole = $name }
     if ($trustsEc2 -and $null -eq $nodeRole) { $nodeRole = @{ Name = $name; Policies = $policies } }
 }
@@ -112,7 +93,6 @@ else {
 
 Write-Head "4. SSM Parameter Store (contrato F8)"
 
-# A doc do lab so descreve o Session Manager; nada garante que o Parameter Store aceite escrita.
 $null = aws ssm put-parameter --name "/fase4/preflight" --value "ok" --type String --overwrite --region $Region
 if ($LASTEXITCODE -eq 0) {
     $null = aws ssm get-parameter --name "/fase4/preflight" --region $Region
@@ -125,7 +105,6 @@ else {
 
 Write-Head "5. Limites da conta (informativo)"
 
-# Nao-fatais: o lab costuma negar a API de service-quotas.
 $vcpu = aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A --query "Quota.Value" --output text --region $Region
 if ($LASTEXITCODE -eq 0) { Write-Ok "Cota de vCPU on-demand: $vcpu (o lab documenta teto de 32)" }
 else { Write-Warn2 "service-quotas indisponivel — assuma o teto documentado: 9 instancias / 32 vCPU" }

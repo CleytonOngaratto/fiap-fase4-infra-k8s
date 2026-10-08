@@ -1,16 +1,4 @@
-﻿<#
-.SYNOPSIS
-    Checklist de retomada de sessão do Learner Lab. Não provisiona nada — orienta e valida.
-
-.DESCRIPTION
-    A infra é destruída entre sessões porque o control plane do EKS cobra ~US$2,40/dia mesmo com o
-    lab desligado. Toda retomada segue a mesma ordem, e este script a imprime e valida.
-
-.EXAMPLE
-    .\scripts\session-start.ps1
-#>
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$Region = "us-east-1")
 
 Write-Host @"
@@ -40,7 +28,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "[OK] Sessao ativa — conta $($identity.Account)" -ForegroundColor Green
 
-# Ja existe algo de pe? Evita subir um segundo cluster por engano (e o custo dobrado disso).
 $clusters = aws eks list-clusters --region $Region --query "clusters" --output json | ConvertFrom-Json
 if ($LASTEXITCODE -eq 0 -and $clusters.Count -gt 0) {
     Write-Host "[!] Ja existe cluster EKS na conta: $($clusters -join ', ')" -ForegroundColor Yellow

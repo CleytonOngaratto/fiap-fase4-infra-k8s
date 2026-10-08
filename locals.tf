@@ -9,7 +9,6 @@ locals {
 
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
 
-  # Sem NAT as subnets privadas não têm rota de saída e o nó nunca completa o registro no control
-  # plane — por isso o modo econômico move os nós para as públicas.
+  # Sem NAT a subnet privada não tem saída e o nó nunca se registra no control plane.
   node_subnet_ids = var.enable_nat_gateway ? aws_subnet.private[*].id : aws_subnet.public[*].id
 }

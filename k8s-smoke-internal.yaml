@@ -1,12 +1,4 @@
-# Teste de fumaça 2 (ver README): NLB INTERNO nas subnets privadas.
-#
-# Por que um manifesto em vez de `kubectl expose --type=LoadBalancer` + `kubectl annotate`:
-# as anotações precisam existir NO MOMENTO da criação do Service. Se o cloud controller já começou
-# a provisionar, ele cria um LB público e NÃO reconcilia para interno depois — e você interpretaria
-# o resultado como "a tag internal-elb não funciona", que é a conclusão errada.
-#
-# Este arquivo NÃO é a app. É descartável: existe para responder, no dia 1, se o desenho
-# "NLB interno + VPC Link v2" é viável nesta conta antes de o API Gateway depender disso.
+# As anotações precisam existir na criação do Service: o controller não converte um LB público em interno depois.
 apiVersion: v1
 kind: Service
 metadata:
@@ -17,7 +9,6 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    # Label que `kubectl create deployment smoke` gera. Se mudar o nome do deployment, mude aqui.
     app: smoke
   ports:
     - port: 80
