@@ -1,0 +1,10 @@
+# Fim de linha determinístico, independente do core.autocrlf de quem clona.
+# Motivo: um mvnw/.sh com CRLF quebra no Git Bash, e um PEM ou segredo com \r gera erro que aponta
+# para o lugar errado.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+*.jpg binary
+*.zip binary

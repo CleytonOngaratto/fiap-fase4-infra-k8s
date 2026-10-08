@@ -1,0 +1,9 @@
+bucket = "fiap-fase4-tfstate-<ACCOUNT_ID>"
+
+key = "infra-k8s/terraform.tfstate"
+
+region = "us-east-1"
+
+use_lockfile = true
+
+encrypt = true

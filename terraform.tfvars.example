@@ -1,0 +1,18 @@
+# Os dois nomes de role vêm do .\scripts\preflight.ps1 (o sufixo é gerado pelo lab e muda a cada reset).
+cluster_role_name = "c2215xxxxxxxxxxxxxxxxxxxxxxxxxxx-LabEksClusterRole-XXXXXXXXXXXX"
+node_role_name    = "c2215xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-LabEksNodeRole-XXXXXXXXXXXX"
+
+# region  = "us-east-1"
+# project = "fiap-fase4"
+
+# false = sem NAT, nós nas subnets públicas. Trocar depois de aplicado recria o node group.
+# enable_nat_gateway = true
+
+# node_instance_types = ["t3.medium"]
+
+# Teto do lab: 9 instâncias / 32 vCPU; 20 ou mais desativam a conta.
+# node_desired_size = 2
+# node_max_size     = 4
+
+# Versão em extended support custa 6x a standard.
+# cluster_version = null

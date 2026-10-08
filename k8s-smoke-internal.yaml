@@ -1,0 +1,15 @@
+# As anotações precisam existir na criação do Service: o controller não converte um LB público em interno depois.
+apiVersion: v1
+kind: Service
+metadata:
+  name: smoke-int
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: smoke
+  ports:
+    - port: 80
+      targetPort: 80
