@@ -1,0 +1,185 @@
+# CI/CD da plataforma — VPC + EKS + ECR.
+#
+#   pull_request para main -> fmt-validate                   (fmt -check + init -backend=false + validate)
+#   push na main           -> fmt-validate                   (merge que só mexe em .md não roda)
+#   workflow_dispatch      -> fmt-validate, depois plan | apply | destroy
+#
+# fmt-validate não usa credencial do lab: é o job que pode ser check obrigatório do PR. plan/apply/destroy
+# dependem da sessão do Learner Lab e, até o gatilho de apply ser definido junto com a plataforma, rodam só
+# por workflow_dispatch — sem credencial e sem infra, um push na main faria o apply falhar e pintaria a main
+# de vermelho.
+#
+# 🔴 As credenciais do AWS Academy são TEMPORÁRIAS (~4h) e incluem session token. Elas expiram
+#    entre sessões e derrubam qualquer job que as use. Renove com scripts/refresh-gh-secrets.ps1.
+
+name: Terraform - Infra K8s (VPC + EKS + ECR)
+
+# O pull_request NÃO tem filtro de caminho: fmt-validate é check obrigatório, e um workflow pulado por
+# filtro de caminho deixa o check obrigatório "Pending" para sempre, travando o merge (doc do GitHub,
+# "Troubleshooting required status checks"). No push o filtro continua: merge que só mexe em documentação
+# não roda Terraform. ⚠️ O filtro é tudo-ou-nada: um único arquivo fora de `**.md` faz o workflow rodar.
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+    paths-ignore: [ "**.md" ]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "O que executar"
+        type: choice
+        required: true
+        default: plan
+        options: [ plan, apply, destroy ]
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+  # Os nomes dos roles do EKS não têm default no Terraform: o lab os cria por CloudFormation com
+  # sufixo gerado, único por instância do laboratório (não é "LabEksClusterRole" puro). Vêm das
+  # repository variables, populadas por scripts/refresh-gh-secrets.ps1 com os valores do preflight.
+  TF_VAR_cluster_role_name: ${{ vars.CLUSTER_ROLE_NAME }}
+  TF_VAR_node_role_name: ${{ vars.NODE_ROLE_NAME }}
+
+jobs:
+  # Sem credencial e sem backend: formatação, sintaxe e tipos em todo PR, com o lab ligado ou não.
+  fmt-validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          # Mesma versão da máquina do dono: evita divergência de formato de state entre local e CI.
+          terraform_version: 1.15.4
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (sem backend)
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+  terraform:
+    # Só manual (ver o cabeçalho). As condições dos steps abaixo continuam prontas para o push na main
+    # quando o gatilho de apply voltar.
+    if: github.event_name == 'workflow_dispatch'
+    needs: fmt-validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # O action acima valida as credenciais ele mesmo (chama sts:GetCallerIdentity para mascarar o
+      # account id), então com o token expirado ele falha ANTES de qualquer step nosso. Um
+      # `if: failure()` aqui é o único lugar onde a mensagem acionável ainda alcança o cenário para o
+      # qual foi escrita — só é avaliado nesta posição, e fica pulado quando as credenciais passam.
+      - name: Lab session expirada?
+        if: failure()
+        run: |
+          echo "::error::Credencial do AWS Academy expirou ou esta invalida (a sessao dura ~4h)."
+          echo "::error::Abra o lab, atualize ~/.aws/credentials e rode scripts/refresh-gh-secrets.ps1 -Org <org>."
+          echo "::error::O AWS_SESSION_TOKEN e obrigatorio; sem ele o erro vem como InvalidClientTokenId."
+
+      # Cobre o caso que o action não cobre: token válido, mas sem permissão.
+      - name: Check lab session
+        run: aws sts get-caller-identity
+
+      # `vars.` é repository VARIABLE, não secret — mora em outra aba das configurações e é por
+      # repositório, então não vem junto com os 3 secrets do lab. Sem o bucket o `init` falharia com erro
+      # de backend, longe da causa real; sem os roles o plan pararia pedindo variável.
+      - name: Check repository variables
+        run: |
+          missing=0
+          if [ -z "${{ vars.TF_STATE_BUCKET }}" ]; then
+            echo "::error::Repository variable TF_STATE_BUCKET nao definida (valor: o bucket criado pelo scripts/bootstrap-backend.ps1)."
+            missing=1
+          fi
+          if [ -z "${{ vars.CLUSTER_ROLE_NAME }}" ] || [ -z "${{ vars.NODE_ROLE_NAME }}" ]; then
+            echo "::error::As repository variables CLUSTER_ROLE_NAME e NODE_ROLE_NAME sao obrigatorias."
+            echo "::error::Os nomes reais tem sufixo gerado pelo lab e mudam se o laboratorio for resetado."
+            missing=1
+          fi
+          if [ "$missing" -eq 1 ]; then
+            echo "::error::Settings > Secrets and variables > Actions > Variables (NAO sao secrets)."
+            echo "::error::Rode scripts/preflight.ps1 e depois scripts/refresh-gh-secrets.ps1 -Org <org>"
+            echo "::error::  -ClusterRoleName <valor> -NodeRoleName <valor> -StateBucket <bucket>."
+            exit 1
+          fi
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.4
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      # Config parcial do backend: o bucket depende da conta do lab, então não pode ser literal no
+      # versions.tf. Mesmo bucket dos outros repos de infra, key diferente.
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=infra-k8s/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        if: github.event_name != 'workflow_dispatch' || inputs.action != 'destroy'
+        run: |
+          terraform plan -no-color -out=tfplan | tee plan.txt
+          {
+            echo "### Terraform plan"
+            echo '```'
+            tail -n 60 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Deploy automático no merge (requisito do desafio) — volta a valer quando o push reativar este job.
+      - name: Terraform apply
+        if: |
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        run: terraform apply -auto-approve tfplan
+
+      # Só manual. É como a infra é derrubada ao fim da sessão sem depender da máquina do dono.
+      # ⚠️ Se a aplicacao estiver implantada: apague antes os Services do tipo LoadBalancer — o ELB deixa ENI nas
+      # subnets e o destroy da VPC trava.
+      - name: Terraform destroy
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
+
+      - name: Show outputs
+        if: success() && github.event_name != 'pull_request'
+        run: terraform output || true
