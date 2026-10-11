@@ -42,7 +42,35 @@ resource "aws_ssm_parameter" "node_sg_id" {
 }
 
 resource "aws_ssm_parameter" "ecr_repo_url" {
-  name  = "/fase4/ecr/repo-url"
+  for_each = aws_ecr_repository.service
+
+  name  = "/fase4/ecr/${each.key}/repo-url"
   type  = "String"
-  value = aws_ecr_repository.app.repository_url
+  value = each.value.repository_url
+}
+
+resource "aws_ssm_parameter" "sns_topic_arn" {
+  for_each = aws_sns_topic.events
+
+  name  = "/fase4/sns/${each.key}/topic-arn"
+  type  = "String"
+  value = each.value.arn
+}
+
+resource "aws_ssm_parameter" "alb_listener_arn" {
+  name  = "/fase4/alb/listener-arn"
+  type  = "String"
+  value = aws_lb_listener.http.arn
+}
+
+resource "aws_ssm_parameter" "alb_sg_id" {
+  name  = "/fase4/alb/sg-id"
+  type  = "String"
+  value = aws_security_group.alb.id
+}
+
+resource "aws_ssm_parameter" "alb_dns" {
+  name  = "/fase4/alb/dns"
+  type  = "String"
+  value = aws_lb.internal.dns_name
 }

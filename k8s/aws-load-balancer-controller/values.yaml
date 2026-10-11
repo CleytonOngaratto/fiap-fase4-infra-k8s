@@ -1,0 +1,28 @@
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podDisruptionBudget:
+  maxUnavailable: 1
+
+# A LabRole tem shield:* em explicitDeny: ligado, o controller erra a cada reconciliação.
+enableShield: false
+enableWaf: false
+enableWafv2: false
+
+enableServiceMutatorWebhook: false
+
+createIngressClassResource: false
+ingressClassParams:
+  create: false
+
+# O certificado do webhook nasce com a hora local; reaproveitá-lo evita gerar outro a cada upgrade.
+keepTLSSecret: true
+
+defaultTags:
+  Project: fiap-fase4

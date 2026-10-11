@@ -1,0 +1,117 @@
+# Todo subchart explícito: no nri-bundle 8.0.22 os defaults não são todos false.
+
+global:
+  customSecretName: newrelic-license
+  customSecretLicenseKey: licenseKey
+  lowDataMode: true
+
+newrelic-infrastructure:
+  enabled: true
+
+  # Desligado: o control plane do EKS não é scrapeável e o DaemonSet não agendaria.
+  controlPlane:
+    enabled: false
+
+  kubelet:
+    kubelet:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100M
+    agent:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100M
+
+  ksm:
+    ksm:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100M
+    forwarder:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100M
+
+kube-state-metrics:
+  enabled: true
+  # Sem resources o pod fica BestEffort: o primeiro a ser despejado quando o nó aperta.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      memory: 128Mi
+
+nri-kube-events:
+  enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  forwarder:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 48Mi
+      limits:
+        memory: 128Mi
+
+# Desligado: o agente Java já envia o stdout da app, e os dois juntos duplicam cada linha.
+newrelic-logging:
+  enabled: false
+
+nri-metadata-injection:
+  enabled: false
+
+nri-prometheus:
+  enabled: false
+
+newrelic-prometheus-agent:
+  enabled: true
+
+  resources:
+    prometheus:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    configurator:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+
+  config:
+    # Job newrelic, não o default: o integrations_filter do default ignora a app em silêncio.
+    kubernetes:
+      jobs:
+        - job_name_prefix: newrelic
+          fallback_scrape_protocol: PrometheusText0.0.4
+          integrations_filter:
+            enabled: false
+          target_discovery:
+            pod: true
+            endpoints: false
+            filter:
+              annotations:
+                newrelic.io/scrape: true
+newrelic-k8s-metrics-adapter:
+  enabled: false
+newrelic-infra-operator:
+  enabled: false
+k8s-agents-operator:
+  enabled: false
+nr-ebpf-agent:
+  enabled: false
+newrelic-pixie:
+  enabled: false
+pixie-chart:
+  enabled: false

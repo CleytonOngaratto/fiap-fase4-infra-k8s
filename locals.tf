@@ -9,6 +9,11 @@ locals {
 
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
 
-  # Sem NAT a subnet privada não tem saída e o nó nunca se registra no control plane.
-  node_subnet_ids = var.enable_nat_gateway ? aws_subnet.private[*].id : aws_subnet.public[*].id
+  ecr_repositories = {
+    os        = "os-service"
+    billing   = "billing-service"
+    execution = "execution-service"
+  }
+
+  sns_topics = ["billing-events", "execution-events"]
 }
