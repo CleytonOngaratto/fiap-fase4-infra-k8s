@@ -46,7 +46,7 @@ $clusterRole = $null
 $labRole = $null
 
 foreach ($name in $roleNames) {
-    $doc = aws iam get-role --role-name $name --query "Role.AssumeRolePolicyDocument" --output json
+    $doc = (aws iam get-role --role-name $name --query "Role.AssumeRolePolicyDocument" --output json) -join "`n"
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "$name — sem permissao de leitura"; continue }
 
     $policies = aws iam list-attached-role-policies --role-name $name --query "AttachedPolicies[].PolicyName" --output json | ConvertFrom-Json
