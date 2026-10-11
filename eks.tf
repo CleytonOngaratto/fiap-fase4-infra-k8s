@@ -3,8 +3,8 @@ data "aws_iam_role" "eks_cluster" {
   name = var.cluster_role_name
 }
 
-data "aws_iam_role" "eks_node" {
-  name = var.node_role_name
+data "aws_iam_role" "lab" {
+  name = "LabRole"
 }
 
 resource "aws_eks_cluster" "main" {
@@ -13,7 +13,7 @@ resource "aws_eks_cluster" "main" {
   version  = var.cluster_version
 
   vpc_config {
-    subnet_ids              = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
+    subnet_ids              = aws_subnet.private[*].id
     endpoint_private_access = true
     endpoint_public_access  = true
     public_access_cidrs     = var.cluster_public_access_cidrs
@@ -29,17 +29,58 @@ resource "aws_eks_cluster" "main" {
   tags = { Name = local.cluster_name }
 }
 
+resource "aws_launch_template" "nodes" {
+  name = "${var.project}-ng"
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+    # Com 1, a resposta do IMDSv2 morre antes de chegar ao pod, que fica sem credencial AWS.
+    http_put_response_hop_limit = 2
+  }
+
+  credit_specification {
+    cpu_credits = "unlimited"
+  }
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+
+    ebs {
+      volume_size           = var.node_disk_size
+      volume_type           = "gp3"
+      delete_on_termination = true
+    }
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags          = merge(local.tags, { Name = "${var.project}-node" })
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags          = merge(local.tags, { Name = "${var.project}-node" })
+  }
+
+  tags = { Name = "${var.project}-ng" }
+}
+
 resource "aws_eks_node_group" "default" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${var.project}-ng"
-  node_role_arn   = data.aws_iam_role.eks_node.arn
+  node_role_arn   = data.aws_iam_role.lab.arn
 
-  subnet_ids = local.node_subnet_ids
+  subnet_ids = aws_subnet.private[*].id
 
   ami_type       = "AL2023_x86_64_STANDARD"
   capacity_type  = "ON_DEMAND"
   instance_types = var.node_instance_types
-  disk_size      = var.node_disk_size
+
+  launch_template {
+    id      = aws_launch_template.nodes.id
+    version = aws_launch_template.nodes.latest_version
+  }
 
   scaling_config {
     desired_size = var.node_desired_size

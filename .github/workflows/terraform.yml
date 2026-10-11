@@ -1,12 +1,13 @@
-name: Terraform - Infra K8s (VPC + EKS + ECR)
+name: Terraform - Infra K8s (VPC + EKS + ECR + ALB + SNS)
 
-# Sem paths-ignore no pull_request: workflow pulado por filtro deixa o check obrigatório "Pending" e trava o merge.
+# Sem filtro de caminho no pull_request: workflow pulado por filtro deixa o check obrigatório "Pending" e trava o merge.
 on:
   pull_request:
     branches: [ "main" ]
+  # O push na main aplica: sem este filtro, um merge só de script, values ou docs subiria a plataforma.
   push:
     branches: [ "main" ]
-    paths-ignore: [ "**.md" ]
+    paths: [ "**.tf", ".terraform.lock.hcl", ".github/workflows/terraform.yml" ]
   workflow_dispatch:
     inputs:
       action:
@@ -23,7 +24,6 @@ env:
   AWS_REGION: us-east-1
   TF_IN_AUTOMATION: "true"
   TF_VAR_cluster_role_name: ${{ vars.CLUSTER_ROLE_NAME }}
-  TF_VAR_node_role_name: ${{ vars.NODE_ROLE_NAME }}
 
 jobs:
   fmt-validate:
@@ -52,12 +52,17 @@ jobs:
         run: terraform validate
 
   terraform:
-    if: github.event_name == 'workflow_dispatch'
     needs: fmt-validate
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
+
+    # No job, não no workflow: um apply em curso não pode enfileirar nem cancelar o fmt-validate de um PR.
+    # Sem cancel-in-progress: abortar um apply no meio deixa recursos fora do state.
+    concurrency:
+      group: terraform-infra-k8s
+      cancel-in-progress: false
 
     steps:
       - name: Checkout repository
@@ -89,15 +94,15 @@ jobs:
             echo "::error::Repository variable TF_STATE_BUCKET nao definida (valor: o bucket criado pelo scripts/bootstrap-backend.ps1)."
             missing=1
           fi
-          if [ -z "${{ vars.CLUSTER_ROLE_NAME }}" ] || [ -z "${{ vars.NODE_ROLE_NAME }}" ]; then
-            echo "::error::As repository variables CLUSTER_ROLE_NAME e NODE_ROLE_NAME sao obrigatorias."
-            echo "::error::Os nomes reais tem sufixo gerado pelo lab e mudam se o laboratorio for resetado."
+          if [ -z "${{ vars.CLUSTER_ROLE_NAME }}" ]; then
+            echo "::error::Repository variable CLUSTER_ROLE_NAME nao definida."
+            echo "::error::O nome real tem sufixo gerado pelo lab e muda se o laboratorio for resetado."
             missing=1
           fi
           if [ "$missing" -eq 1 ]; then
             echo "::error::Settings > Secrets and variables > Actions > Variables (NAO sao secrets)."
             echo "::error::Rode scripts/preflight.ps1 e depois scripts/refresh-gh-secrets.ps1 -Org <org>"
-            echo "::error::  -ClusterRoleName <valor> -NodeRoleName <valor> -StateBucket <bucket>."
+            echo "::error::  -ClusterRoleName <valor> -StateBucket <bucket>."
             exit 1
           fi
 

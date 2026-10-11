@@ -47,16 +47,12 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_eip" "nat" {
-  count = var.enable_nat_gateway ? 1 : 0
-
   domain = "vpc"
   tags   = { Name = "${var.project}-nat-eip" }
 }
 
 resource "aws_nat_gateway" "main" {
-  count = var.enable_nat_gateway ? 1 : 0
-
-  allocation_id = aws_eip.nat[0].id
+  allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public[0].id
 
   depends_on = [aws_internet_gateway.main]
@@ -90,11 +86,11 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route" "private_nat" {
-  count = var.enable_nat_gateway ? length(aws_route_table.private) : 0
+  count = length(aws_route_table.private)
 
   route_table_id         = aws_route_table.private[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.main[0].id
+  nat_gateway_id         = aws_nat_gateway.main.id
 }
 
 resource "aws_route_table_association" "private" {
@@ -111,4 +107,13 @@ resource "aws_vpc_endpoint" "s3" {
   route_table_ids   = concat(aws_route_table.private[*].id, [aws_route_table.public.id])
 
   tags = { Name = "${var.project}-s3-gateway" }
+}
+
+resource "aws_vpc_endpoint" "dynamodb" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.region}.dynamodb"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = aws_route_table.private[*].id
+
+  tags = { Name = "${var.project}-dynamodb-gateway" }
 }

@@ -28,17 +28,27 @@ output "private_subnet_ids" {
   value       = aws_subnet.private[*].id
 }
 
-output "ecr_repository_url" {
-  description = "URL do repositório ECR para docker tag/push."
-  value       = aws_ecr_repository.app.repository_url
+output "ecr_repository_urls" {
+  description = "URL do repositório ECR de cada serviço, para docker tag/push."
+  value       = { for service, repo in aws_ecr_repository.service : service => repo.repository_url }
+}
+
+output "sns_topic_arns" {
+  description = "ARN de cada tópico SNS FIFO."
+  value       = { for topic, t in aws_sns_topic.events : topic => t.arn }
+}
+
+output "alb_dns_name" {
+  description = "DNS do ALB interno; só resolve para IPs privados."
+  value       = aws_lb.internal.dns_name
+}
+
+output "alb_listener_arn" {
+  description = "Listener HTTP do ALB interno, onde cada serviço pendura a sua regra de path."
+  value       = aws_lb_listener.http.arn
 }
 
 output "kubeconfig_command" {
   description = "Comando para configurar o kubectl."
   value       = "aws eks update-kubeconfig --region ${var.region} --name ${aws_eks_cluster.main.name}"
-}
-
-output "node_placement" {
-  description = "Onde os nós rodam — confirma o efeito de enable_nat_gateway."
-  value       = var.enable_nat_gateway ? "subnets privadas (com NAT)" : "subnets publicas (modo economico, sem NAT)"
 }

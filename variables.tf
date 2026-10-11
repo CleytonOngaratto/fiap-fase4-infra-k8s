@@ -17,21 +17,15 @@ variable "vpc_cidr" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "Subnets públicas, uma por AZ. /20 porque o VPC CNI consome um IP da subnet por pod."
+  description = "Subnets públicas, uma por AZ. Só o NAT mora nelas."
   type        = list(string)
   default     = ["10.0.0.0/20", "10.0.16.0/20"]
 }
 
 variable "private_subnet_cidrs" {
-  description = "Subnets privadas, uma por AZ. Aqui moram os nós, o RDS e a Lambda de autenticação."
+  description = "Subnets privadas, uma por AZ: nós, ALB interno, bancos e Lambda. /20 porque o VPC CNI consome um IP da subnet por pod."
   type        = list(string)
   default     = ["10.0.128.0/20", "10.0.144.0/20"]
-}
-
-variable "enable_nat_gateway" {
-  description = "NAT Gateway (~US$1,20/dia). Com false os nós vão para as subnets públicas — alternar recria o node group."
-  type        = bool
-  default     = true
 }
 
 variable "cluster_version" {
@@ -49,15 +43,6 @@ variable "cluster_role_name" {
   type        = string
 }
 
-variable "node_role_name" {
-  description = <<-EOT
-    Role dos nós, com AmazonEKSWorkerNodePolicy + AmazonEKS_CNI_Policy +
-    AmazonEC2ContainerRegistryReadOnly. Sem default pelo mesmo motivo do cluster_role_name: um valor
-    errado só falharia ~10 min depois, na criação do node group.
-  EOT
-  type        = string
-}
-
 variable "cluster_public_access_cidrs" {
   description = "Quem alcança o endpoint público da API. 0.0.0.0/0 é necessário para o GitHub Actions (IP dinâmico)."
   type        = list(string)
@@ -65,12 +50,9 @@ variable "cluster_public_access_cidrs" {
 }
 
 variable "node_instance_types" {
-  description = <<-EOT
-    O lab libera nano/micro/small/medium/large. t3.medium porque o VPC CNI limita pods por ENI:
-    t3.small dá 11 pods e ~1,5GiB, apertado com os DaemonSets do New Relic.
-  EOT
+  description = "O lab libera de nano a large. O VPC CNI limita pods por ENI: t3.large comporta 35 pods por nó."
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["t3.large"]
 }
 
 variable "node_desired_size" {
@@ -86,9 +68,9 @@ variable "node_min_size" {
 }
 
 variable "node_max_size" {
-  description = "Máximo de nós. O lab permite 9 instâncias / 32 vCPU, e 20+ DESATIVAM a conta apagando tudo."
+  description = "Máximo de nós (folga para o rolling update). O lab permite 9 instâncias / 32 vCPU, e 20+ DESATIVAM a conta apagando tudo."
   type        = number
-  default     = 4
+  default     = 3
 }
 
 variable "node_disk_size" {
@@ -103,14 +85,8 @@ variable "enable_metrics_server" {
   default     = true
 }
 
-variable "ecr_repo_name" {
-  description = "Repositório de imagem da app, consumido pela pipeline do Repo 4."
-  type        = string
-  default     = "car-workshop-api"
-}
-
 variable "ecr_keep_last_images" {
-  description = "Quantas imagens manter no ECR."
+  description = "Quantas imagens manter em cada repositório ECR."
   type        = number
   default     = 10
 }

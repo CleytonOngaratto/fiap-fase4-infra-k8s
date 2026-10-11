@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [string]$Region = "us-east-1",
-    [string[]]$CandidateRoles = @("LabEksClusterRole", "LabEksNodeRole", "LabRole")
+    [string[]]$CandidateRoles = @("LabEksClusterRole", "LabRole")
 )
 
 $ErrorActionPreference = "Continue"
@@ -20,13 +20,13 @@ if ($LASTEXITCODE -ne 0 -or $null -eq $identity) {
 }
 Write-Ok "Conta $($identity.Account) · $($identity.Arn)"
 
-Write-Head "2. Roles de EKS (descoberta)"
+Write-Head "2. Roles do cluster e dos nos (descoberta)"
 
 $roleNames = @()
 # Path=='/' exclui os service-linked roles do EKS, que sobrevivem ao destroy e seriam escolhidos por engano.
 $listed = aws iam list-roles --query "Roles[?Path=='/'].RoleName" --output json | ConvertFrom-Json
 if ($LASTEXITCODE -eq 0 -and $listed) {
-    $roleNames = @($listed | Where-Object { $_ -match "Eks" -or $_ -eq "LabRole" })
+    $roleNames = @($listed | Where-Object { $_ -match "LabEksClusterRole" -or $_ -eq "LabRole" })
     Write-Ok "list-roles permitido — $($roleNames.Count) role(s) candidato(s)"
 }
 else {
@@ -43,10 +43,7 @@ if ($roleNames.Count -eq 0) {
 }
 
 $clusterRole = $null
-$nodeRole = $null
-
-# LabEks primeiro: a LabRole tambem confia nos dois principals e seria escolhida antes.
-$roleNames = @($roleNames | Sort-Object { $_ -notmatch "LabEks" })
+$labRole = $null
 
 foreach ($name in $roleNames) {
     $doc = aws iam get-role --role-name $name --query "Role.AssumeRolePolicyDocument" --output json
@@ -58,37 +55,32 @@ foreach ($name in $roleNames) {
     $trustsEks = $doc -match "eks\.amazonaws\.com"
     $trustsEc2 = $doc -match "ec2\.amazonaws\.com"
 
-    $roles = @()
-    if ($trustsEks) { $roles += "CLUSTER" }
-    if ($trustsEc2) { $roles += "NODE" }
-    $label = if ($roles.Count -gt 0) { $roles -join "+" } else { "nenhum (nao serve para EKS)" }
-
-    Write-Host "  - $name -> $label"
+    Write-Host "  - $name -> confia em eks: $trustsEks · em ec2: $trustsEc2"
     Write-Host "      policies: $($policies -join ', ')" -ForegroundColor DarkGray
 
-    if ($trustsEks -and $null -eq $clusterRole) { $clusterRole = $name }
-    if ($trustsEc2 -and $null -eq $nodeRole) { $nodeRole = @{ Name = $name; Policies = $policies } }
+    if ($name -eq "LabRole") { $labRole = @{ TrustsEc2 = $trustsEc2; Policies = $policies } }
+    elseif ($trustsEks -and $null -eq $clusterRole) { $clusterRole = $name }
 }
 
 Write-Head "3. Validacao dos papeis"
-if ($clusterRole) { Write-Ok "cluster_role_name = $clusterRole   <- para o terraform.tfvars" }
-else { Write-Fail "Nenhum role confia em eks.amazonaws.com — o control plane nao pode ser criado." }
+if ($clusterRole) { Write-Ok "cluster_role_name = $clusterRole   <- terraform.tfvars e variable CLUSTER_ROLE_NAME" }
+else { Write-Fail "Nenhuma LabEksClusterRole confia em eks.amazonaws.com — o control plane nao pode ser criado." }
 
-if ($nodeRole) {
-    Write-Ok "node_role_name = $($nodeRole.Name)   <- para o terraform.tfvars"
-    foreach ($needed in @("AmazonEKSWorkerNodePolicy", "AmazonEKS_CNI_Policy")) {
-        if ($nodeRole.Policies -contains $needed) { Write-Ok "  $needed" }
-        else { Write-Fail "  $needed AUSENTE no role de node — os nos nao entram no cluster." }
-    }
-    if ($nodeRole.Policies -contains "AmazonEC2ContainerRegistryReadOnly") {
-        Write-Ok "  AmazonEC2ContainerRegistryReadOnly"
-    }
-    else {
-        Write-Warn2 "  AmazonEC2ContainerRegistryReadOnly ausente — pull do ECR privado vai falhar ao implantar a aplicacao (ImagePullBackOff)."
-    }
+if (-not $labRole) {
+    Write-Fail "LabRole nao encontrada — e a role dos nos (o Terraform a le por data source)."
+}
+elseif (-not $labRole.TrustsEc2) {
+    Write-Fail "LabRole nao confia em ec2.amazonaws.com — o NODE GROUP nao pode ser criado (o cluster subiria e falharia 10 min depois)."
 }
 else {
-    Write-Fail "Nenhum role confia em ec2.amazonaws.com — o NODE GROUP nao pode ser criado (o cluster subiria e falharia 10 min depois)."
+    Write-Ok "LabRole confia em ec2.amazonaws.com (role dos nos)"
+    foreach ($needed in @("AmazonEKSWorkerNodePolicy", "AmazonEC2ContainerRegistryReadOnly")) {
+        if ($labRole.Policies -contains $needed) { Write-Ok "  $needed" }
+        else { Write-Fail "  $needed AUSENTE na LabRole — os nos nao entram no cluster ou nao baixam imagem do ECR." }
+    }
+    if ($labRole.Policies -notcontains "AmazonEKS_CNI_Policy") {
+        Write-Host "  [INFO] AmazonEKS_CNI_Policy nao anexada: no lab, as acoes do VPC CNI vem das VocLabPolicy." -ForegroundColor DarkGray
+    }
 }
 
 Write-Head "4. SSM Parameter Store (contrato F8)"
@@ -100,7 +92,7 @@ if ($LASTEXITCODE -eq 0) {
     $null = aws ssm delete-parameter --name "/fase4/preflight" --region $Region
 }
 else {
-    Write-Fail "ssm:PutParameter negado. O contrato F8 (integracao dos 4 repos) precisa ser redesenhado ANTES do apply."
+    Write-Fail "ssm:PutParameter negado. O contrato F8 (integracao dos 5 repos) precisa ser redesenhado ANTES do apply."
 }
 
 Write-Head "5. Limites da conta (informativo)"
@@ -114,7 +106,7 @@ if ($LASTEXITCODE -eq 0) { Write-Ok "EIPs alocados: $eips (o NAT precisa de 1; l
 
 Write-Host ""
 Write-Host "  LEMBRETE: 20+ instancias EC2 simultaneas DESATIVAM a conta do lab e apagam tudo." -ForegroundColor Yellow
-Write-Host "  node_max_size esta em 4 por isso. Nao suba sem contar o que ja existe na conta." -ForegroundColor Yellow
+Write-Host "  node_max_size esta em 3 por isso. Nao suba sem contar o que ja existe na conta." -ForegroundColor Yellow
 
 Write-Host ""
 if ($script:Failed) {
