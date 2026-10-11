@@ -293,7 +293,9 @@ as regras de security group que criou.
    vivo) e depois `helm uninstall` do `nri-bundle` e do controller. **Recusa rodar** — sem destruir nada — se o
    contexto do `kubectl` não for o cluster da Fase 4;
 2. roda `terraform init` (com o lock versionado intocado) e `terraform destroy` em cada repositório da lista; um
-   repositório sem `backend.hcl` é pulado com aviso;
+   repositório sem `backend.hcl` é pulado com aviso. O `cluster_role_name` vem do `terraform.tfvars` ou de
+   `TF_VAR_cluster_role_name`; sem os dois, o script descobre a `LabEksClusterRole` na conta — e aborta, antes de
+   mexer em qualquer coisa, se não achar;
 3. **confere a conta categoria por categoria** — EKS, EC2, NAT, RDS, snapshots, ELB v1/v2, target groups, VPCs
    não-default, EIPs, ENIs, EBS, ECR, API Gateways, VPC Links, Lambdas, SGs, SNS, SQS, DynamoDB e launch
    templates — e sai com código diferente de zero se sobrou qualquer coisa.

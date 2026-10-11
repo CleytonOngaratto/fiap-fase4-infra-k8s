@@ -137,6 +137,19 @@ if (-not $Force) {
     if ($answer -ne "DESTRUIR") { Write-Host "  Abortado." -ForegroundColor Yellow; exit 0 }
 }
 
+Write-Head "Variaveis do Terraform"
+if ($env:TF_VAR_cluster_role_name -or (Test-Path (Join-Path $root "fiap-fase4-infra-k8s\terraform.tfvars"))) {
+    Write-Ok "cluster_role_name vem do ambiente ou do terraform.tfvars"
+}
+else {
+    $env:TF_VAR_cluster_role_name = Get-AwsValue @("iam", "list-roles", "--query", "Roles[?contains(RoleName,'LabEksClusterRole')].RoleName|[0]")
+    if ([string]::IsNullOrWhiteSpace($env:TF_VAR_cluster_role_name) -or $env:TF_VAR_cluster_role_name -eq "None") {
+        Write-Host "  [FAIL] LabEksClusterRole nao encontrada: o destroy le os data sources e precisa do nome real. Nada foi destruido." -ForegroundColor Red
+        exit 1
+    }
+    Write-Ok "cluster_role_name descoberto: $($env:TF_VAR_cluster_role_name)"
+}
+
 Write-Head "Cluster: Services LoadBalancer, TargetGroupBindings e charts"
 $clusterName = Get-AwsValue @("ssm", "get-parameter", "--name", "/fase4/eks/cluster-name", "--query", "Parameter.Value")
 $clusterStatus = $null
