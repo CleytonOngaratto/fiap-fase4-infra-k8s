@@ -182,7 +182,7 @@ tudo em texto plano. Cada repositório publica o que cria e lê o que precisa.
 | `/fase4/ecr/{os,billing,execution}/repo-url` | URL do repositório de imagem de cada serviço | pipeline de cada serviço |
 | `/fase4/sns/{billing-events,execution-events}/topic-arn` | ARN de cada tópico FIFO | infra e configuração dos serviços |
 | `/fase4/alb/listener-arn` | listener HTTP do ALB interno | infra dos serviços (regra de path), `auth-serverless` (integração do VPC Link) |
-| `/fase4/alb/sg-id` | security group do ALB | infra dos serviços (`TargetGroupBinding`) |
+| `/fase4/alb/sg-id` | security group do ALB | pipeline de cada serviço (`networking` do `TargetGroupBinding`), `auth-serverless` (saída do SG do VPC Link) |
 | `/fase4/alb/dns` | DNS do ALB, **só host** (sem esquema nem porta) | diagnóstico e testes de dentro da VPC |
 
 > `node-sg-id` é o `cluster_security_group_id`: o *launch template* não declara security group, e nesse caso o EKS
@@ -281,24 +281,36 @@ JVMs.
 > tabela acima como sinal, nunca o painel. O control plane cobra mesmo com a sessão do lab encerrada: destruir entre
 > sessões é obrigação.
 
+**Ordem de subida:** plataforma (este repositório) → infra de cada serviço (`terraform/` de os, billing e execution:
+banco, target group e regra no ALB) → deploy dos serviços (pipeline de cada um) → borda (`session/` do
+`auth-serverless`; o `persistent/` sobe uma vez por conta do lab).
+
 **Ordem de destruição:** borda de sessão (o API Gateway persistente fica) → `TargetGroupBinding`s e controller →
 infra de cada serviço → plataforma. O controller tem de estar vivo quando os bindings são apagados: é ele quem remove
 as regras de security group que criou.
 
 ### `destroy-all.ps1` — teardown na ordem, com auditoria no fim
 
-[`scripts/destroy-all.ps1`](scripts/destroy-all.ps1):
+[`scripts/destroy-all.ps1`](scripts/destroy-all.ps1), nesta ordem:
 
-1. **limpa o cluster**, se ele existir: Services `LoadBalancer`, todos os `TargetGroupBinding`s (com o controller
-   vivo) e depois `helm uninstall` do `nri-bundle` e do controller. **Recusa rodar** — sem destruir nada — se o
-   contexto do `kubectl` não for o cluster da Fase 4;
-2. roda `terraform init` (com o lock versionado intocado) e `terraform destroy` em cada repositório da lista; um
-   repositório sem `backend.hcl` é pulado com aviso. O `cluster_role_name` vem do `terraform.tfvars` ou de
-   `TF_VAR_cluster_role_name`; sem os dois, o script descobre a `LabEksClusterRole` na conta — e aborta, antes de
-   mexer em qualquer coisa, se não achar;
-3. **confere a conta categoria por categoria** — EKS, EC2, NAT, RDS, snapshots, ELB v1/v2, target groups, VPCs
+1. **confere o contexto do `kubectl`** se o cluster existir — e **recusa rodar**, sem destruir nada, se ele não for o
+   cluster da Fase 4;
+2. `terraform destroy` do root **`session/`** do `fiap-fase4-auth-serverless` (VPC Link, integração e rotas). O root
+   **`persistent/`** (o HTTP API, a stage e o log group) **nunca** entra: a URL dele está configurada no painel do
+   Mercado Pago;
+3. **limpa o cluster**: Services `LoadBalancer`, todos os `TargetGroupBinding`s (com o controller vivo) e depois
+   `helm uninstall` do `nri-bundle` e do controller;
+4. `terraform destroy` do `terraform/` do **os** (RDS, target group, regra no ALB), do **billing** e do **execution**;
+5. `terraform destroy` da **plataforma** (este repositório);
+6. **confere a conta categoria por categoria** — EKS, EC2, NAT, RDS, snapshots, ELB v1/v2, target groups, VPCs
    não-default, EIPs, ENIs, EBS, ECR, API Gateways, VPC Links, Lambdas, SGs, SNS, SQS, DynamoDB e launch
-   templates — e sai com código diferente de zero se sobrou qualquer coisa.
+   templates — e sai com código diferente de zero se sobrou qualquer coisa. A API persistente e o log group dela
+   aparecem à parte, como **persistentes por desenho**, e não contam como sobra.
+
+Cada destroy roda `terraform init` com o lock versionado intocado e precisa do `backend.hcl` local do root
+(gitignored, criado a partir do `backend.hcl.example` de cada um); um root sem `backend.hcl` é pulado com aviso, e a
+auditoria acusa o que sobrar. O `cluster_role_name` vem do `terraform.tfvars` ou de `TF_VAR_cluster_role_name`; sem os
+dois, o script descobre a `LabEksClusterRole` na conta — e aborta, antes de mexer em qualquer coisa, se não achar.
 
 ```powershell
 .\scripts\destroy-all.ps1              # confirma antes de agir
@@ -306,7 +318,7 @@ as regras de security group que criou.
 .\scripts\destroy-all.ps1 -AuditOnly   # só a auditoria, sem destruir nada
 ```
 
-O bucket de state e os parâmetros de bootstrap do SSM sobrevivem por desenho; os tópicos SNS **somem** com a
+O bucket de state, os parâmetros de bootstrap do SSM e o `/fase4/apigw/*` do `persistent/` sobrevivem por desenho; os tópicos SNS **somem** com a
 plataforma e voltam no próximo `apply`. Os recursos do próprio laboratório (as Lambdas e o tópico `RedshiftSNS` que
 vêm em toda conta) ficam fora da auditoria.
 

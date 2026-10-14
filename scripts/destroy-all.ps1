@@ -1,7 +1,6 @@
 ﻿[CmdletBinding()]
 param(
     [string]$Region = "us-east-1",
-    [string]$Namespace = "car-workshop",
     [switch]$Force,
     [switch]$SkipAudit,
     [switch]$AuditOnly
@@ -10,6 +9,8 @@ param(
 # 'Continue', nao 'Stop': no PS 5.1 o stderr de executavel nativo vira NativeCommandError.
 $ErrorActionPreference = "Continue"
 $script:Failed = $false
+
+$PersistentApiName = "fiap-fase4-api"
 
 function Write-Head($t) { Write-Host "`n=== $t ===" -ForegroundColor Cyan }
 function Write-Ok($t) { Write-Host "  [OK]   $t" -ForegroundColor Green }
@@ -50,7 +51,7 @@ function Invoke-AuditAndExit {
         "ENIs disponiveis"    = @("ec2", "describe-network-interfaces", "--filters", "Name=status,Values=available", "--query", "NetworkInterfaces[].NetworkInterfaceId")
         "EBS volumes"         = @("ec2", "describe-volumes", "--query", "Volumes[].VolumeId")
         "ECR repos"           = @("ecr", "describe-repositories", "--query", "repositories[].repositoryName")
-        "API Gateways"        = @("apigatewayv2", "get-apis", "--query", "Items[].Name")
+        "API Gateways"        = @("apigatewayv2", "get-apis", "--query", "Items[?Name!='$PersistentApiName'].Name")
         "VPC Links"           = @("apigatewayv2", "get-vpc-links", "--query", "Items[].Name")
         "Lambdas fiap-*"      = @("lambda", "list-functions", "--query", "Functions[?starts_with(FunctionName,'fiap')].FunctionName")
         "SGs nao-default"     = @("ec2", "describe-security-groups", "--query", "SecurityGroups[?GroupName!='default'].GroupName")
@@ -77,14 +78,28 @@ function Invoke-AuditAndExit {
         }
     }
 
+    Write-Head "Persistente por desenho (G18): fica de pe entre sessoes"
+    $persistent = [ordered]@{
+        "API Gateway"         = @("apigatewayv2", "get-apis", "--query", "Items[?Name=='$PersistentApiName'].Name")
+        "Log group de acesso" = @("logs", "describe-log-groups", "--log-group-name-prefix", "/aws/apigateway/$PersistentApiName", "--query", "logGroups[].logGroupName")
+    }
+    foreach ($name in $persistent.Keys) {
+        $value = Get-AwsValue $persistent[$name]
+        if (-not $script:LastAwsOk) {
+            Write-Fail "$name : CONSULTA FALHOU (credencial expirada?) - resultado NAO confiavel"
+        }
+        elseif ([string]::IsNullOrWhiteSpace($value) -or $value -eq "None") {
+            Write-Host "  [--]   $name : nao existe (o root persistent/ do auth ainda nao foi aplicado nesta conta)" -ForegroundColor DarkGray
+        }
+        else {
+            Write-Ok "$name : $value  (persistente por desenho, G18 - nao e sobra)"
+        }
+    }
+
     Write-Head "SSM (o que deve sobreviver)"
     $params = Get-AwsValue @("ssm", "get-parameters-by-path", "--path", "/fase4", "--recursive", "--query", "Parameters[].Name")
     if ($params) {
         ($params -split "\s+") | Where-Object { $_ } | Sort-Object | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-        if ($params -match "/fase4/eks/lb-dns") {
-            Write-Warn2 "/fase4/eks/lb-dns sobreviveu (esperado: e do cd.yml, nenhum Terraform o apaga) e agora aponta para um ELB morto."
-            Write-Host "         Rode o workflow_dispatch do cd.yml no repo app ANTES do proximo apply do auth-serverless." -ForegroundColor Yellow
-        }
     }
 
     Write-Host ""
@@ -103,10 +118,59 @@ function Invoke-AuditAndExit {
 
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
-$repos = @(
-    [pscustomobject]@{ Name = "fiap-fase4-auth-serverless"; Label = "Lambda + API Gateway" }
-    [pscustomobject]@{ Name = "fiap-fase4-infra-k8s"; Label = "VPC + EKS + NAT + ECR + ALB + SNS" }
+$edgeRoots = @(
+    [pscustomobject]@{ Path = "fiap-fase4-auth-serverless\session"; Label = "VPC Link + integracao + rotas do API Gateway" }
 )
+$infraRoots = @(
+    [pscustomobject]@{ Path = "fiap-fase4-os-service\terraform"; Label = "RDS + target group + regra no ALB" }
+    [pscustomobject]@{ Path = "fiap-fase4-billing-service\terraform"; Label = "target group + regra no ALB" }
+    [pscustomobject]@{ Path = "fiap-fase4-execution-service\terraform"; Label = "target group + regra no ALB" }
+    [pscustomobject]@{ Path = "fiap-fase4-infra-k8s"; Label = "VPC + EKS + NAT + ECR + ALB + SNS" }
+)
+
+function Invoke-TerraformDestroy {
+    param([Parameter(Mandatory)]$Target)
+
+    Write-Head "destroy: $($Target.Path)  ($($Target.Label))"
+    $dir = Join-Path $root $Target.Path
+    $backend = Join-Path $dir "backend.hcl"
+
+    if (-not (Test-Path $backend)) {
+        Write-Warn2 "$($Target.Path)\backend.hcl ausente — nada aplicado a partir desta maquina; pulando."
+        Write-Host "         Se ha state no bucket (aplicado pelo CI), crie o backend.hcl a partir do backend.hcl.example e rode de novo; a auditoria acusa a sobra." -ForegroundColor DarkGray
+        return
+    }
+
+    $bucket = ((Get-Content $backend | Select-String '^\s*bucket') -replace '.*=\s*"?([^"]+)"?.*', '$1').Trim()
+    $key = ((Get-Content $backend | Select-String '^\s*key') -replace '.*=\s*"?([^"]+)"?.*', '$1').Trim()
+    if ($bucket -and $key) {
+        $lock = Get-AwsValue @("s3api", "head-object", "--bucket", $bucket, "--key", "$key.tflock", "--query", "LastModified")
+        if ($lock) {
+            Write-Fail "existe um LOCK no state ($key.tflock, de $lock) — um apply do CI esta rodando. Espere ele terminar e rode de novo."
+            return
+        }
+    }
+
+    Push-Location $dir
+    try {
+        $init = Invoke-Native -Exe "terraform" -NativeArgs @("init", "-input=false", "-reconfigure", "-lockfile=readonly", "-backend-config=backend.hcl", "-no-color")
+        if ($init.ExitCode -ne 0) {
+            Write-Fail "terraform init falhou em $($Target.Path)"
+            $init.Lines | Where-Object { $_ -match "Error" } | Select-Object -First 4 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+            return
+        }
+
+        $r = Invoke-Native -Exe "terraform" -NativeArgs @("destroy", "-no-color", "-auto-approve")
+        $done = $r.Lines | Where-Object { $_ -match "Destroy complete" } | Select-Object -Last 1
+        if ($r.ExitCode -eq 0 -and $done) { Write-Ok $done.Trim() }
+        elseif ($r.ExitCode -eq 0) { Write-Ok "nada a destruir (state vazio)" }
+        else {
+            Write-Fail "destroy falhou em $($Target.Path)"
+            $r.Lines | Where-Object { $_ -match "^Error|Error:" } | Select-Object -First 4 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
+        }
+    }
+    finally { Pop-Location }
+}
 
 if ($AuditOnly -and $SkipAudit) {
     Write-Host "  -AuditOnly e -SkipAudit sao contraditorios: use um ou outro." -ForegroundColor Red
@@ -129,9 +193,11 @@ if ($AuditOnly) {
 
 if (-not $Force) {
     Write-Host ""
-    Write-Host "  Vai destruir TODA a infraestrutura da Fase 4 nesta conta:" -ForegroundColor Yellow
-    foreach ($r in $repos) { Write-Host "    - $($r.Name)  ($($r.Label))" -ForegroundColor Yellow }
-    Write-Host "  Os parametros de bootstrap do SSM e o bucket de state sobrevivem (nenhum Terraform os cria)." -ForegroundColor DarkGray
+    Write-Host "  Vai destruir TODA a infraestrutura de sessao da Fase 4 nesta conta, nesta ordem:" -ForegroundColor Yellow
+    foreach ($t in $edgeRoots) { Write-Host "    - $($t.Path)  ($($t.Label))" -ForegroundColor Yellow }
+    Write-Host "    - limpeza do cluster (TargetGroupBindings com o controller vivo, helm uninstall)" -ForegroundColor Yellow
+    foreach ($t in $infraRoots) { Write-Host "    - $($t.Path)  ($($t.Label))" -ForegroundColor Yellow }
+    Write-Host "  Sobrevivem: o root persistent/ do auth (API $PersistentApiName, G18), o bucket de state e o bootstrap do SSM." -ForegroundColor DarkGray
     Write-Host ""
     $answer = Read-Host "  Digite DESTRUIR para confirmar"
     if ($answer -ne "DESTRUIR") { Write-Host "  Abortado." -ForegroundColor Yellow; exit 0 }
@@ -150,7 +216,7 @@ else {
     Write-Ok "cluster_role_name descoberto: $($env:TF_VAR_cluster_role_name)"
 }
 
-Write-Head "Cluster: Services LoadBalancer, TargetGroupBindings e charts"
+Write-Head "Cluster: contexto do kubectl"
 $clusterName = Get-AwsValue @("ssm", "get-parameter", "--name", "/fase4/eks/cluster-name", "--query", "Parameter.Value")
 $clusterStatus = $null
 if ($clusterName) {
@@ -170,7 +236,16 @@ else {
         Write-Host "         Rode: aws eks update-kubeconfig --name $clusterName --region $Region  e repita." -ForegroundColor DarkGray
         exit 1
     }
+    Write-Ok "contexto: $context"
+}
 
+foreach ($t in $edgeRoots) { Invoke-TerraformDestroy -Target $t }
+
+Write-Head "Cluster: Services LoadBalancer, TargetGroupBindings e charts"
+if (-not $clusterStatus) {
+    Write-Ok "sem cluster — nada a limpar"
+}
+else {
     $kube = Invoke-Native -Exe "kubectl" -NativeArgs @("get", "svc", "-A", "--no-headers", "--request-timeout=25s")
     if ($kube.ExitCode -ne 0) {
         Write-Warn2 "kubectl nao alcancou o cluster — sem limpeza interna (a auditoria confere ELB e target groups no fim)"
@@ -216,46 +291,7 @@ else {
     }
 }
 
-foreach ($repo in $repos) {
-    Write-Head "destroy: $($repo.Name)  ($($repo.Label))"
-    $dir = Join-Path $root $repo.Name
-
-    if (-not (Test-Path (Join-Path $dir "backend.hcl"))) {
-        Write-Warn2 "$($repo.Name)/backend.hcl ausente — nada aplicado a partir desta maquina; pulando."
-        Write-Host "         Se ha state no bucket (aplicado pelo CI), crie o backend.hcl e rode de novo; a auditoria acusa a sobra." -ForegroundColor DarkGray
-        continue
-    }
-
-    $bucket = ((Get-Content (Join-Path $dir "backend.hcl") | Select-String '^\s*bucket') -replace '.*=\s*"?([^"]+)"?.*', '$1').Trim()
-    $key = ((Get-Content (Join-Path $dir "backend.hcl") | Select-String '^\s*key') -replace '.*=\s*"?([^"]+)"?.*', '$1').Trim()
-    if ($bucket -and $key) {
-        $lock = Get-AwsValue @("s3api", "head-object", "--bucket", $bucket, "--key", "$key.tflock", "--query", "LastModified")
-        if ($lock) {
-            Write-Fail "existe um LOCK no state ($key.tflock, de $lock) — um apply do CI esta rodando. Espere ele terminar e rode de novo."
-            continue
-        }
-    }
-
-    Push-Location $dir
-    try {
-        $init = Invoke-Native -Exe "terraform" -NativeArgs @("init", "-input=false", "-reconfigure", "-lockfile=readonly", "-backend-config=backend.hcl", "-no-color")
-        if ($init.ExitCode -ne 0) {
-            Write-Fail "terraform init falhou em $($repo.Name)"
-            $init.Lines | Where-Object { $_ -match "Error" } | Select-Object -First 4 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
-            continue
-        }
-
-        $r = Invoke-Native -Exe "terraform" -NativeArgs @("destroy", "-no-color", "-auto-approve")
-        $done = $r.Lines | Where-Object { $_ -match "Destroy complete" } | Select-Object -Last 1
-        if ($r.ExitCode -eq 0 -and $done) { Write-Ok $done.Trim() }
-        elseif ($r.ExitCode -eq 0) { Write-Ok "nada a destruir (state vazio)" }
-        else {
-            Write-Fail "destroy falhou em $($repo.Name)"
-            $r.Lines | Where-Object { $_ -match "^Error|Error:" } | Select-Object -First 4 | ForEach-Object { Write-Host "         $_" -ForegroundColor DarkGray }
-        }
-    }
-    finally { Pop-Location }
-}
+foreach ($t in $infraRoots) { Invoke-TerraformDestroy -Target $t }
 
 if ($SkipAudit) {
     Write-Host "`n  -SkipAudit: a auditoria NAO rodou. Confira a conta a mao antes de dormir." -ForegroundColor Yellow
