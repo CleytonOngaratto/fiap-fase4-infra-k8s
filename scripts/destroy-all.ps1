@@ -122,9 +122,9 @@ $edgeRoots = @(
     [pscustomobject]@{ Path = "fiap-fase4-auth-serverless\session"; Label = "VPC Link + integracao + rotas do API Gateway" }
 )
 $infraRoots = @(
-    [pscustomobject]@{ Path = "fiap-fase4-os-service\terraform"; Label = "RDS + target group + regra no ALB" }
+    [pscustomobject]@{ Path = "fiap-fase4-os-service\terraform"; Label = "RDS + target group + regra no ALB + fila de respostas da saga" }
     [pscustomobject]@{ Path = "fiap-fase4-billing-service\terraform"; Label = "target group + regra no ALB" }
-    [pscustomobject]@{ Path = "fiap-fase4-execution-service\terraform"; Label = "target group + regra no ALB" }
+    [pscustomobject]@{ Path = "fiap-fase4-execution-service\terraform"; Label = "target group + regra no ALB + fila de comandos" }
     [pscustomobject]@{ Path = "fiap-fase4-infra-k8s"; Label = "VPC + EKS + NAT + ECR + ALB + SNS" }
 )
 
