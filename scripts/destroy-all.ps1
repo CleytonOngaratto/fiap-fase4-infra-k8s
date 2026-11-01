@@ -33,6 +33,20 @@ function Get-AwsValue {
     return ($r.Text -replace "`r", "").Trim()
 }
 
+# O lockfile sobrevive a morte do processo (credencial expirada, Ctrl+C), entao idade nao distingue lock vivo
+# de orfao — quem distingue e o campo Who, e e por isto que vale baixar o objeto em vez de so olhar a data.
+function Get-StateLockOwner {
+    param([Parameter(Mandatory)][string]$Bucket, [Parameter(Mandatory)][string]$Key)
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+    try {
+        $r = Invoke-Native -Exe "aws" -NativeArgs @("s3api", "get-object", "--bucket", $Bucket, "--key", $Key, "--region", $Region, $tmp)
+        if ($r.ExitCode -ne 0 -or -not (Test-Path $tmp)) { return $null }
+        return (Get-Content $tmp -Raw | ConvertFrom-Json).Who
+    }
+    catch { return $null }
+    finally { Remove-Item $tmp -ErrorAction SilentlyContinue }
+}
+
 function Invoke-AuditAndExit {
     Write-Head "Auditoria da conta (o passo que faltou em 2026-09-02)"
 
@@ -146,7 +160,12 @@ function Invoke-TerraformDestroy {
     if ($bucket -and $key) {
         $lock = Get-AwsValue @("s3api", "head-object", "--bucket", $bucket, "--key", "$key.tflock", "--query", "LastModified")
         if ($lock) {
-            Write-Fail "existe um LOCK no state ($key.tflock, de $lock) — um apply do CI esta rodando. Espere ele terminar e rode de novo."
+            $who = Get-StateLockOwner -Bucket $bucket -Key "$key.tflock"
+            if (-not $who) { $who = "desconhecido" }
+            Write-Fail "existe um LOCK no state ($key.tflock, de $lock, criado por '$who')."
+            Write-Host "         Quem criou decide: 'runner@...' e o CI — espere o run terminar." -ForegroundColor DarkGray
+            Write-Host "         Se e esta maquina e 'gh run list' nao mostra run ativo, o lock e orfao de uma sessao interrompida; apague e rode de novo:" -ForegroundColor DarkGray
+            Write-Host "         aws s3api delete-object --bucket $bucket --key $key.tflock" -ForegroundColor DarkGray
             return
         }
     }
