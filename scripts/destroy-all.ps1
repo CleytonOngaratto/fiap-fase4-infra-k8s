@@ -141,6 +141,7 @@ $infraRoots = @(
     [pscustomobject]@{ Path = "fiap-fase4-execution-service\terraform"; Label = "target group + regra no ALB + fila de comandos + tabela do DynamoDB" }
     [pscustomobject]@{ Path = "fiap-fase4-infra-k8s"; Label = "VPC + EKS + NAT + ECR + ALB + SNS" }
 )
+$PlatformRoot = "fiap-fase4-infra-k8s"
 
 function Invoke-TerraformDestroy {
     param([Parameter(Mandatory)]$Target)
@@ -310,7 +311,18 @@ else {
     }
 }
 
-foreach ($t in $infraRoots) { Invoke-TerraformDestroy -Target $t }
+# A plataforma publica os parametros /fase4 que os outros roots leem como data source, e data source que nao
+# resolve aborta o plan antes do destroy: derruba-la depois de um root falhar deixa esse root sem conseguir
+# nem planejar, e a sobra so sai por CLI na mao. Por isto falha acima para a fila em vez de so avisar.
+foreach ($t in $infraRoots) {
+    if ($t.Path -eq $PlatformRoot -and $script:Failed) {
+        Write-Fail "um passo acima falhou — a plataforma NAO sera destruida."
+        Write-Host "         Resolva o [FAIL] acima e rode de novo; o script e idempotente." -ForegroundColor DarkGray
+        Write-Host "         Se a falha for irreparavel, destrua a plataforma por ultimo e a mao, em $PlatformRoot." -ForegroundColor DarkGray
+        break
+    }
+    Invoke-TerraformDestroy -Target $t
+}
 
 if ($SkipAudit) {
     Write-Host "`n  -SkipAudit: a auditoria NAO rodou. Confira a conta a mao antes de dormir." -ForegroundColor Yellow
