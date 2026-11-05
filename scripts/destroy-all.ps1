@@ -12,6 +12,12 @@ $script:Failed = $false
 
 $PersistentApiName = "fiap-fase4-api"
 
+# O helm desta maquina vive fora do PATH, e sem ele os charts so saem junto com o cluster.
+$helmHome = Join-Path $env:LOCALAPPDATA "Programs\helm"
+if (-not (Get-Command helm -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $helmHome "helm.exe"))) {
+    $env:Path += ";$helmHome"
+}
+
 function Write-Head($t) { Write-Host "`n=== $t ===" -ForegroundColor Cyan }
 function Write-Ok($t) { Write-Host "  [OK]   $t" -ForegroundColor Green }
 function Write-Warn2($t) { Write-Host "  [WARN] $t" -ForegroundColor Yellow }
@@ -57,6 +63,7 @@ function Invoke-AuditAndExit {
         "NAT Gateways"        = @("ec2", "describe-nat-gateways", "--filter", "Name=state,Values=available,pending,deleting", "--query", "NatGateways[].NatGatewayId")
         "RDS"                 = @("rds", "describe-db-instances", "--query", "DBInstances[].DBInstanceIdentifier")
         "RDS snapshots"       = @("rds", "describe-db-snapshots", "--snapshot-type", "manual", "--query", "DBSnapshots[].DBSnapshotIdentifier")
+        "RDS subnet groups"   = @("rds", "describe-db-subnet-groups", "--query", "DBSubnetGroups[].DBSubnetGroupName")
         "ELB classic"         = @("elb", "describe-load-balancers", "--query", "LoadBalancerDescriptions[].LoadBalancerName")
         "ELB v2"              = @("elbv2", "describe-load-balancers", "--query", "LoadBalancers[].LoadBalancerName")
         "Target groups"       = @("elbv2", "describe-target-groups", "--query", "TargetGroups[].TargetGroupName")
@@ -293,7 +300,8 @@ else {
         }
 
         if (-not (Get-Command helm -ErrorAction SilentlyContinue)) {
-            Write-Fail "helm fora do PATH — charts nao desinstalados (o destroy do cluster os leva junto)"
+            # Aviso, nao falha: falha aqui faria a trava abaixo poupar a plataforma, que e a parte mais cara.
+            Write-Warn2 "helm nao encontrado — charts nao desinstalados (o destroy do cluster os leva junto)"
         }
         else {
             $charts = @(

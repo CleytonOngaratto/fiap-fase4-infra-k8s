@@ -104,6 +104,15 @@ else { Write-Warn2 "service-quotas indisponivel — assuma o teto documentado: 9
 $eips = aws ec2 describe-addresses --query "length(Addresses)" --output text --region $Region
 if ($LASTEXITCODE -eq 0) { Write-Ok "EIPs alocados: $eips (o NAT precisa de 1; limite padrao 5)" }
 
+Write-Head "6. Energia desta maquina"
+$battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($battery -and $battery.BatteryStatus -ne 2) {
+    Write-Warn2 "Na bateria ($($battery.EstimatedChargeRemaining)%). Se a maquina apagar no meio do destroy, a plataforma fica de pe a ~US$ 0,34/h: ligue na tomada."
+}
+else {
+    Write-Ok "Na tomada, ou sem bateria"
+}
+
 Write-Host ""
 Write-Host "  LEMBRETE: 20+ instancias EC2 simultaneas DESATIVAM a conta do lab e apagam tudo." -ForegroundColor Yellow
 Write-Host "  node_max_size esta em 3 por isso. Nao suba sem contar o que ja existe na conta." -ForegroundColor Yellow
