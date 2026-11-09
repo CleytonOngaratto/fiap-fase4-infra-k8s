@@ -99,7 +99,7 @@ function Invoke-AuditAndExit {
         }
     }
 
-    Write-Head "Persistente por desenho (G18): fica de pe entre sessoes"
+    Write-Head "Persistente por desenho (ADR-004): fica de pe entre sessoes"
     $persistent = [ordered]@{
         "API Gateway"         = @("apigatewayv2", "get-apis", "--query", "Items[?Name=='$PersistentApiName'].Name")
         "Log group de acesso" = @("logs", "describe-log-groups", "--log-group-name-prefix", "/aws/apigateway/$PersistentApiName", "--query", "logGroups[].logGroupName")
@@ -113,7 +113,7 @@ function Invoke-AuditAndExit {
             Write-Host "  [--]   $name : nao existe (o root persistent/ do auth ainda nao foi aplicado nesta conta)" -ForegroundColor DarkGray
         }
         else {
-            Write-Ok "$name : $value  (persistente por desenho, G18 - nao e sobra)"
+            Write-Ok "$name : $value  (persistente por desenho, ADR-004 - nao e sobra)"
         }
     }
 
@@ -224,7 +224,7 @@ if (-not $Force) {
     foreach ($t in $edgeRoots) { Write-Host "    - $($t.Path)  ($($t.Label))" -ForegroundColor Yellow }
     Write-Host "    - limpeza do cluster (TargetGroupBindings com o controller vivo, helm uninstall)" -ForegroundColor Yellow
     foreach ($t in $infraRoots) { Write-Host "    - $($t.Path)  ($($t.Label))" -ForegroundColor Yellow }
-    Write-Host "  Sobrevivem: o root persistent/ do auth (API $PersistentApiName, G18), o bucket de state e o bootstrap do SSM." -ForegroundColor DarkGray
+    Write-Host "  Sobrevivem: o root persistent/ do auth (API $PersistentApiName, ADR-004), o bucket de state e o bootstrap do SSM." -ForegroundColor DarkGray
     Write-Host ""
     $answer = Read-Host "  Digite DESTRUIR para confirmar"
     if ($answer -ne "DESTRUIR") { Write-Host "  Abortado." -ForegroundColor Yellow; exit 0 }
