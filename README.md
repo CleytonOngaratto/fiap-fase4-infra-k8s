@@ -35,28 +35,27 @@ parâmetros daqui.
 
 ```mermaid
 flowchart TB
-    APIGW["API Gateway HTTP API - repo auth-serverless"]
+    APIGW["API Gateway HTTP API<br/>repo auth-serverless"]
     EKS["EKS control plane"]
-    ECR[("ECR x3 - os, billing, execution")]
-    SNS{{"SNS FIFO - billing-events, execution-events"}}
-    SSM["SSM Parameter Store /fase4"]
+    ECR[("ECR x3<br/>os, billing, execution")]
+    SNS{{"SNS FIFO<br/>billing-events, execution-events"}}
 
-    subgraph PUB["Subnets publicas /20 - so o NAT"]
+    subgraph PUB["Subnets públicas /20 — só o NAT"]
         NAT["NAT Gateway"]
         IGW["Internet Gateway"]
     end
 
     subgraph PRIV["Subnets privadas /20"]
-        VPCL["VPC Link - repo auth-serverless"]
-        ALB["ALB interno - listener 80, padrao 404"]
-        NODES["Node group - 2x t3.large AL2023 - LabRole, IMDSv2 hop 2"]
-        EPS["Gateway endpoints S3 e DynamoDB - sem custo"]
-        DBS[("Bancos dos servicos - repos dos servicos")]
+        VPCL["VPC Link<br/>repo auth-serverless"]
+        ALB["ALB interno<br/>listener 80, padrão 404"]
+        NODES["Node group 2x t3.large AL2023<br/>LabRole, IMDSv2 hop 2"]
+        EPS["Gateway endpoints<br/>S3 e DynamoDB, sem custo"]
+        DBS[("Bancos dos serviços<br/>repos dos serviços")]
     end
 
     APIGW -.-> VPCL
     VPCL -.-> ALB
-    ALB -.->|"target group + TargetGroupBinding - repo de cada servico"| NODES
+    ALB -.->|"TargetGroupBinding<br/>repo de cada serviço"| NODES
     EKS --- NODES
     NODES --> EPS
     EPS --> ECR
@@ -64,10 +63,6 @@ flowchart TB
     NAT --> IGW
     NAT --> SNS
     NODES -.-> DBS
-    EKS -.-> SSM
-    ALB -.-> SSM
-    SNS -.-> SSM
-    ECR -.-> SSM
 
     classDef outro stroke-dasharray:4 4,color:#888
     class APIGW,VPCL,DBS outro
@@ -95,11 +90,16 @@ configurada**: a `LabRole` é a role do node group e o *launch template* sobe o 
 resposta do serviço de metadados chegar até o pod. É uma restrição do AWS Academy (sem IRSA nem Pod Identity) — ver
 [ADR-002](https://github.com/CleytonOngaratto/fiap-fase4-os-service/blob/main/docs/arquitetura/adr/ADR-002-credencial-dos-pods.md).
 
-## Pré-requisitos
+## Tecnologias e pré-requisitos
 
-| Ferramenta | Versão | Observação |
+| Ferramenta ou tecnologia | Versão | Observação |
 |---|---|---|
 | Terraform | **1.15.4** (`>= 1.11`) | `>= 1.11` por causa do lock nativo do backend S3 (`use_lockfile`) |
+| Provider `hashicorp/aws` | **6.57.1** | fixado no [`.terraform.lock.hcl`](.terraform.lock.hcl) |
+| Amazon EKS | **1.36** | `cluster_version = null`: a AWS escolhe uma versão em *standard support*; 1.36 foi a medida em 2026-10-11 |
+| Nós do cluster | AL2023, 2× `t3.large` | node group gerenciado, com o *launch template* daqui |
+| AWS Load Balancer Controller | chart **3.5.0** | só `TargetGroupBinding`, por [`scripts/install-lb-controller.ps1`](scripts/install-lb-controller.ps1) |
+| New Relic `nri-bundle` | chart **8.0.22** | por [`scripts/install-newrelic-k8s.ps1`](scripts/install-newrelic-k8s.ps1) |
 | AWS CLI | v2 | credenciais **temporárias** do Learner Lab (com `aws_session_token`) |
 | kubectl | **1.35** | compatível com o EKS 1.34–1.36 (política de ±1 versão) |
 | helm | **3.21** | instala o controller e o `nri-bundle` |
@@ -334,6 +334,8 @@ Continuam valendo, da fase anterior:
 [contrato por SSM](https://github.com/CleytonOngaratto/fiap-fase3-app/blob/main/docs/arquitetura/adr/ADR-001-ssm-vs-terraform-remote-state.md),
 [API do cluster pública](https://github.com/CleytonOngaratto/fiap-fase3-app/blob/main/docs/arquitetura/adr/ADR-004-api-do-cluster-publica.md)
 e [VPC em recursos crus](https://github.com/CleytonOngaratto/fiap-fase3-app/blob/main/docs/arquitetura/adr/ADR-005-vpc-em-recursos-crus.md).
+O que mudaria numa conta AWS real está em
+[Lab × Produção](https://github.com/CleytonOngaratto/fiap-fase4-os-service/blob/main/docs/arquitetura/lab-vs-producao.md).
 
 | Decisão | Motivo |
 |---|---|
