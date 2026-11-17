@@ -96,12 +96,12 @@ resposta do serviço de metadados chegar até o pod. É uma restrição do AWS A
 |---|---|---|
 | Terraform | **1.15.4** (`>= 1.11`) | `>= 1.11` por causa do lock nativo do backend S3 (`use_lockfile`) |
 | Provider `hashicorp/aws` | **6.57.1** | fixado no [`.terraform.lock.hcl`](.terraform.lock.hcl) |
-| Amazon EKS | **1.36** | `cluster_version = null`: a AWS escolhe uma versão em *standard support*; 1.36 foi a medida em 2026-10-11 |
+| Amazon EKS | **1.37** | `cluster_version = null`: a AWS escolhe uma versão em *standard support*; 1.37 foi a medida em 2026-11-13 |
 | Nós do cluster | AL2023, 2× `t3.large` | node group gerenciado, com o *launch template* daqui |
 | AWS Load Balancer Controller | chart **3.5.0** | só `TargetGroupBinding`, por [`scripts/install-lb-controller.ps1`](scripts/install-lb-controller.ps1) |
 | New Relic `nri-bundle` | chart **8.0.22** | por [`scripts/install-newrelic-k8s.ps1`](scripts/install-newrelic-k8s.ps1) |
 | AWS CLI | v2 | credenciais **temporárias** do Learner Lab (com `aws_session_token`) |
-| kubectl | **1.35** | compatível com o EKS 1.34–1.36 (política de ±1 versão) |
+| kubectl | **1.35.9** | fora da política de ±1 versão para o EKS 1.37; funcionou em 2026-11-13 e 2026-11-15, em apply, rollout, smoke e e2e |
 | helm | **3.21** | instala o controller e o `nri-bundle` |
 | gh | qualquer | só para `scripts/refresh-gh-secrets.ps1` |
 
